@@ -5,6 +5,11 @@ app_description = "custom v1"
 app_email = "anjarian46@gmail.com"
 app_license = "mit"
 
+#doc_events = {
+#    'Journal Entry': {
+        #'validate': 'hafi_custom_v1.journal_overrides.override_naming_series'
+#    }
+#}
 # Apps
 # ------------------
 
