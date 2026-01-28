@@ -5,14 +5,13 @@ app_description = "custom v1"
 app_email = "anjarian46@gmail.com"
 app_license = "mit"
 
-#doc_events = {
-#    'Journal Entry': {
-        #'validate': 'hafi_custom_v1.journal_overrides.override_naming_series'
-#    }
-#}
+
 # Apps
 # ------------------
-
+doctype_js = {
+    "Sales Invoice": "public/js/sales_invoice.js",
+    "Journal Entry": "public/js/journal_entry.js"
+}
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
@@ -246,4 +245,3 @@ app_license = "mit"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-
