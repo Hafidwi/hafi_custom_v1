@@ -1,7 +1,23 @@
 frappe.ui.form.on('Journal Entry', {
+    onload: function(frm) {
+        // Menerapkan filter pada field custom_bank_account
+        frm.set_query('custom_bank_account', function() {
+            return {
+                filters: {
+                    'company': frm.doc.company,
+                    'is_company_account': 1,
+                    'disabled': 0
+                }
+            };
+        });
+    },
+    
     refresh: function(frm) {
+        // Memastikan filter tetap jalan saat refresh
+        frm.trigger('onload');
         console.log("Script Hafi Custom Loaded");
     },
+
     custom_bank_account: function(frm) {
         if (frm.doc.custom_bank_account) {
             frappe.call({
@@ -9,11 +25,23 @@ frappe.ui.form.on('Journal Entry', {
                 args: {
                     doctype: "Bank Account",
                     filters: { name: frm.doc.custom_bank_account },
-                    fieldname: "account"
+                    fieldname: ["account", "custom_incoming_no", "custom_outgoing_no"]
                 },
                 callback: function(r) {
                     if (r.message && r.message.account) {
                         const target_acc = r.message.account;
+
+                        // --- BAGIAN PENENTUAN SERIES ---
+                        let selected_series = "";
+                        if (frm.doc.custom_type === "Receive") {
+                            selected_series = r.message.custom_incoming_no;
+                        } else if (frm.doc.custom_type === "Pay") {
+                            selected_series = r.message.custom_outgoing_no;
+                        }
+
+                        if (selected_series) {
+                            frm.set_value('naming_series', selected_series);
+                        }
 
                         // Cari baris yang benar-benar kosong atau sudah berisi akun bank tersebut
                         let row = frm.doc.accounts.find(d => !d.account) || 
