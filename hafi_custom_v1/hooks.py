@@ -10,7 +10,9 @@ app_license = "mit"
 # ------------------
 doctype_js = {
     "Sales Invoice": "public/js/sales_invoice.js",
-    "Journal Entry": "public/js/journal_entry.js"
+    "Journal Entry": "public/js/journal_entry.js",
+    "Employee Advance": "public/js/employee_advance.js",
+    "Purchase Invoice": "public/js/purchase_invoice.js"
 }
 # required_apps = []
 
