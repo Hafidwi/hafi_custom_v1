@@ -1,0 +1,57 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-02-03 15:44:14.714302",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "sales_invoice_dp",
+  "dp_date",
+  "dp_remark",
+  "amount"
+ ],
+ "fields": [
+  {
+   "fieldname": "sales_invoice_dp",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sales Invoice DP",
+   "options": "Sales Invoice",
+   "reqd": 1
+  },
+  {
+   "fieldname": "dp_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "DP Date"
+  },
+  {
+   "fieldname": "dp_remark",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "DP Remark"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-02-03 23:31:09.798505",
+ "modified_by": "Administrator",
+ "module": "hafi custom",
+ "name": "Sales Invoice DP",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
