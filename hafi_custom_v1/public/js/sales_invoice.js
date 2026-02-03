@@ -30,5 +30,49 @@ frappe.ui.form.on('Sales Invoice', {
 
             }, __("Create"));
         }
+    // 2. Cek Naming Series saat load (hanya jika masih Draft)
+        if (frm.doc.docstatus === 0) {
+            frm.trigger('update_naming_series');
+        }
+    },
+
+    // Trigger saat checkbox 'Is Return' berubah
+    is_return: function(frm) {
+        frm.trigger('update_naming_series');
+    },
+
+    // Trigger saat checkbox 'DP' berubah
+    // PENTING: Ganti 'custom_dp' dengan nama field asli jika berbeda (misal: 'dp')
+    custom_dp: function(frm) { 
+        frm.trigger('update_naming_series');
+        frm.trigger('toggle_dp_section');
+    },
+
+    // Fungsi Utama Logika Series
+    update_naming_series: function(frm) {
+        // Prioritas 1: Jika ini Return, maka jadi Credit Note (CN)
+        if (frm.doc.is_return) {
+            frm.set_value('naming_series', '.custom_abbr.-CN-.MM.YY');
+        
+        // Prioritas 2: Jika bukan Return TAPI checkbox DP dicentang
+        } else if (frm.doc.custom_dp) {
+            frm.set_value('naming_series', '.custom_abbr.-DP-.MM.YY');
+            
+        // Prioritas 3: Jika bukan keduanya, kembali ke Invoice normal (INV)
+        } else {
+            frm.set_value('naming_series', '.custom_abbr.-INV-.MM.YY');
+        }
+    },
+    toggle_dp_section: function(frm) {
+        // GANTI 'sec_down_payment' DENGAN FIELDNAME SECTION BREAK ANDA
+        let section_fieldname = 'custom_down_payment'; 
+
+        if (frm.doc.custom_dp) {
+            // Jika DP dicentang, HIDE section (false)
+            frm.toggle_display(section_fieldname, false);
+        } else {
+            // Jika DP tidak dicentang, SHOW section (true)
+            frm.toggle_display(section_fieldname, true);
+        }
     }
 });
