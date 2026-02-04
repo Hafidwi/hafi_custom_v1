@@ -33,6 +33,7 @@ frappe.ui.form.on('Sales Invoice', {
     // 2. Cek Naming Series saat load (hanya jika masih Draft)
         if (frm.doc.docstatus === 0) {
             frm.trigger('update_naming_series');
+            frm.trigger('update_item_account');
         }
         // 2. LOGIKA BARU: Cek Penggunaan DP (Traceability)
         // Hanya jalan jika ini adalah Invoice DP (custom_dp dicentang) dan sudah disubmit
@@ -51,7 +52,11 @@ frappe.ui.form.on('Sales Invoice', {
     custom_dp: function(frm) { 
         frm.trigger('update_naming_series');
         frm.trigger('toggle_dp_section');
-        frm.trigger('update_debit_to');
+        frm.trigger('update_item_account');
+    },
+    // Trigger saat Item ditambahkan/diubah
+    items_add: function(frm) {
+        frm.trigger('update_item_account');
     },
 
     // Fungsi Utama Logika Series
@@ -82,159 +87,245 @@ frappe.ui.form.on('Sales Invoice', {
         }
     },
     // Logic 3: Update Account Debit To (NEW)
-    update_debit_to: function(frm) {
-        if (!frm.doc.company) return;
+    //update_debit_to: function(frm) {
+    //    if (!frm.doc.company) return;
 
-        if (frm.doc.custom_dp) {
+    //    if (frm.doc.custom_dp) {
             // KASUS: DP Dicentang -> Ambil akun DP dari Company
             // GANTI 'custom_default_down_payment_account' DENGAN FIELDNAME ASLI DI COMPANY
-            frappe.db.get_value('Company', frm.doc.company, 'custom_default_down_payment_account', (r) => {
-                if (r && r.custom_default_down_payment_account) {
-                    frm.set_value('debit_to', r.custom_default_down_payment_account);
-                } else {
-                    frappe.msgprint('Akun Default Down Payment belum diset di Company.');
-                }
-            });
-        } else {
+    //       frappe.db.get_value('Company', frm.doc.company, 'custom_default_down_payment_account', (r) => {
+    //            if (r && r.custom_default_down_payment_account) {
+    //                frm.set_value('debit_to', r.custom_default_down_payment_account);
+    //            } else {
+    //                frappe.msgprint('Akun Default Down Payment belum diset di Company.');
+    //            }
+    //        });
+    //    } else {
             // KASUS: DP Di-uncheck -> Kembalikan ke akun Piutang Standar
             // Mengambil 'default_receivable_account' dari Company
-            frappe.db.get_value('Company', frm.doc.company, 'default_receivable_account', (r) => {
-                if (r && r.default_receivable_account) {
-                    frm.set_value('debit_to', r.default_receivable_account);
-                }
+    //        frappe.db.get_value('Company', frm.doc.company, 'default_receivable_account', (r) => {
+    //            if (r && r.default_receivable_account) {
+    //                frm.set_value('debit_to', r.default_receivable_account);
+    //            }
+    //        });
+    //    }
+    //},
+
+    // --- REVISI UTAMA: LOGIC AKUN DP ---
+    // HAPUS function update_debit_to, GANTI dengan ini:
+    update_item_account: function(frm) {
+        if (!frm.doc.company) return;
+
+        // Jika DP dicentang
+        if (frm.doc.custom_dp) {
+            let dp_field_in_company = 'custom_default_down_payment_account';
+            
+            frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r) => {
+                if (r && r[dp_field_in_company]) {
+                    let dp_account = r[dp_field_in_company];
+
+                    // Loop semua item, ganti Income Account menjadi Akun DP
+                    $.each(frm.doc.items || [], function(i, d) {
+                        if (d.income_account !== dp_account) {
+                            frappe.model.set_value(d.doctype, d.name, 'income_account', dp_account);
+                        }
+                    });
+                    
+                    // (Opsional) Kembalikan Debit To ke Default jika sebelumnya salah
+                    // Biarkan ERPNext menghandle Debit To (biasanya otomatis Piutang)
+                } 
             });
-        }
+        } 
+        // Note: Jika di-uncheck, kita biarkan saja income account yang ada (atau user ganti manual), 
+        // karena sulit menebak akun income default per item secara massal.
     },
+    // 1. FUNGSI TOMBOL GET DOWN PAYMENT (VERSI BARU - PARTIAL)
     custom_get_down_payment: function(frm) {
-        // Validasi: Customer harus dipilih dulu
         if (!frm.doc.customer) {
-            frappe.msgprint(__("Harap pilih Customer terlebih dahulu."));
+            frappe.msgprint("Pilih Customer dulu.");
             return;
         }
 
-        // Panggil Server untuk cari Invoice DP
+        // Panggil API Python untuk dapatkan SISA SALDO
         frappe.call({
-            method: 'frappe.client.get_list',
+            method: 'hafi_custom_v1.api.get_available_dp_invoices',
             args: {
-                doctype: 'Sales Invoice',
-                filters: {
-                    'customer': frm.doc.customer, // Filter customer yg sama
-                    'custom_dp': 1,              // Hanya yang dicentang DP
-                    'docstatus': 1,              // Hanya yang sudah Submitted/Posted
-                    'status': ['!=', 'Cancelled'] // Jangan ambil yang Cancelled
-                },
-                // Ambil field yang dibutuhkan
-                // net_total adalah jumlah sebelum pajak
-                fields: ['name', 'posting_date', 'remarks', 'net_total'] 
+                customer: frm.doc.customer
             },
             callback: function(r) {
                 if (r.message && r.message.length > 0) {
+                    // GANTI 'si_down_payment' DENGAN NAMA FIELD TABEL ANDA (misal: custom_si_down_payment)
+                    let table_field = 'custom_si_down_payment'; 
                     
-                    // Opsional: Bersihkan tabel dulu agar tidak duplikat jika diklik 2x
-                    frm.clear_table('custom_si_down_payment'); 
-
-                    let total_dp = 0;
-
-                    // Loop hasil dan masukkan ke Child Table
+                    frm.clear_table(table_field); 
+                    
                     $.each(r.message, function(i, d) {
-                        // 'si_down_payment' adalah nama field tabel di Sales Invoice
-                        let row = frm.add_child('custom_si_down_payment'); 
-                        
-                        // Mapping Data
+                        let row = frm.add_child(table_field);
                         row.sales_invoice_dp = d.name;
                         row.dp_date = d.posting_date;
                         row.dp_remark = d.remarks;
-                        row.amount = d.net_total; // Nilai sebelum PPN
-                        total_dp += d.net_total;
+                        
+                        // PENTING: Ambil remaining_amount (Sisa), bukan net_total
+                        row.amount = d.remaining_amount; 
                     });
 
-                    // Refresh tabel agar data muncul di layar
-                    frm.refresh_field('custom_si_down_payment');
-                    
-                    frappe.msgprint(__("{0} Invoice DP berhasil ditarik.", [r.message.length]));
+                    frm.refresh_field(table_field);
+                    frappe.msgprint(r.message.length + " Invoice DP dengan sisa saldo ditemukan.");
 
-                    // --- INSERT KE TABLE SALES TAXES AND CHARGES ---
-                    if (total_dp > 0) {
-                        // Ambil Akun DP dari Company
-                        let dp_field_in_company = 'custom_default_down_payment_account';
-                        
-                        frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r_comp) => {
-                            if (r_comp && r_comp[dp_field_in_company]) {
-                                let dp_account = r_comp[dp_field_in_company];
+                    // Panggil fungsi hitung pajak
+                    frm.trigger('calculate_dp_deduction');
 
-                                // Cek Table Taxes (Initialize jika kosong)
-                                if (!frm.doc.taxes) frm.doc.taxes = [];
-                                let taxes = frm.doc.taxes;
-                                let dp_row = null;
-
-                                // LOGIKA: Apakah baris pertama sudah Akun DP?
-                                // Jika ya -> Update nilainya
-                                // Jika tidak -> Insert baris baru di ATAS (Index 0)
-                                if (taxes.length > 0 && taxes[0].account_head === dp_account) {
-                                    dp_row = taxes[0];
-                                } else {
-                                    // Tambah row baru (masuk ke paling bawah)
-                                    let new_row = frappe.model.add_child(frm.doc, "Sales Taxes and Charges", "taxes");
-                                    // Pindahkan dari bawah ke atas (Index 0)
-                                    taxes.pop(); 
-                                    taxes.unshift(new_row); 
-                                    dp_row = new_row;
-                                }
-
-                                // Set Nilai Row
-                                dp_row.charge_type = 'Actual';
-                                dp_row.account_head = dp_account;
-                                dp_row.description = "Potongan Down Payment (DP)";
-                                dp_row.tax_amount = -1 * total_dp; // PENTING: Negatif agar mengurangi
-
-                                // TAMBAHAN: Masukkan Cost Center dari Header agar jurnal lengkap
-                                // Cost Center wajib jika di setting akun mewajibkannya
-                                dp_row.cost_center = frm.doc.cost_center || null;
-                                
-                                // Reset kolom lain agar bersih
-                                dp_row.rate = 0; 
-
-                                // Refresh Grid Pajak
-                                frm.refresh_field('taxes');
-                                
-                                // Trigger Perhitungan Total Invoice agar Grand Total berubah
-                                // Kita panggil trigger 'validate' atau manipulasi doc
-                                if(frm.script_manager.has_handlers('validate', frm.doc.doctype)){
-                                     frm.script_manager.trigger('validate');
-                                }
-                                
-                            } else {
-                                frappe.msgprint("Warning: Tidak bisa update Pajak. Akun Default DP belum diset di Company.");
-                            }
-                        });
-                    }
-                    // ----------------------------------------------
                 } else {
-                    frappe.msgprint(__("Tidak ditemukan Invoice DP untuk Customer ini."));
+                    frappe.msgprint("Tidak ada Invoice DP dengan sisa saldo untuk customer ini.");
                 }
             }
         });
     },
+
+    // 2. FUNGSI HITUNG PAJAK (UPDATED: DYNAMIC RATE FROM ITEM TAX TEMPLATE)
+    calculate_dp_deduction: function(frm) {
+        let total_dp = 0;
+        let table_field = 'custom_si_down_payment'; 
+
+        // 1. Hitung Total DP
+        $.each(frm.doc[table_field] || [], function(i, d) {
+            total_dp += d.amount;
+        });
+
+        // ----------------------------------------------------------------
+        // STEP BARU: CARI RATE DARI ITEM TAX TEMPLATE
+        // ----------------------------------------------------------------
+        let item_tax_template_name = null;
+        
+        // Cek Item pertama yang memiliki Tax Template
+        if (frm.doc.items && frm.doc.items.length > 0) {
+            $.each(frm.doc.items, function(i, item){
+                if (item.item_tax_template) {
+                    item_tax_template_name = item.item_tax_template;
+                    return false; // Break loop jika sudah ketemu
+                }
+            });
+        }
+
+        // Fungsi Helper untuk Update Tabel Pajak (agar tidak duplikat kode)
+        let apply_tax_logic = function(rate_percent) {
+             if (!frm.doc.taxes) frm.doc.taxes = [];
+             let taxes = frm.doc.taxes;
+
+             // --- SKENARIO A: ADA DP ---
+             if (total_dp > 0) {
+                let dp_field_in_company = 'custom_default_down_payment_account';
+                
+                frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r_comp) => {
+                    if (r_comp && r_comp[dp_field_in_company]) {
+                        let dp_account = r_comp[dp_field_in_company];
+                        let dp_row = null;
+
+                        // A1. Pastikan Row DP ada di Urutan Pertama (Index 0)
+                        if (taxes.length > 0 && taxes[0].account_head === dp_account) {
+                            dp_row = taxes[0];
+                        } else {
+                            let new_row = frappe.model.add_child(frm.doc, "Sales Taxes and Charges", "taxes");
+                            taxes.pop(); 
+                            taxes.unshift(new_row); 
+                            dp_row = new_row;
+                        }
+
+                        // A2. Isi Data Row DP
+                        dp_row.charge_type = 'Actual';
+                        dp_row.account_head = dp_account;
+                        dp_row.description = "Potongan Down Payment (DP)";
+                        dp_row.tax_amount = -1 * total_dp; 
+                        dp_row.rate = 0; 
+                        dp_row.cost_center = frm.doc.cost_center || null;
+
+                        // A3. UPDATE ROW PPN (PAKAI RATE DINAMIS)
+                        for (let i = 1; i < taxes.length; i++) {
+                            let row = taxes[i];
+                            
+                            // Ubah ke 'On Previous Row Total'
+                            row.charge_type = 'On Previous Row Total';
+                            row.row_id = i; 
+
+                            // FORCE RATE SESUAI TEMPLATE
+                            // Jika row.rate kosong/nol, kita paksa isi dengan rate dari template
+                            if (row.rate === 0 && rate_percent > 0) {
+                                row.rate = rate_percent; 
+                            }
+                        }
+
+                        frm.refresh_field('taxes');
+                        if(frm.script_manager.has_handlers('validate', frm.doc.doctype)){
+                             frm.script_manager.trigger('validate');
+                        }
+                    }
+                });
+            } 
+            // --- SKENARIO B: DP NOL / RESET ---
+            else {
+                 let dp_field_in_company = 'custom_default_down_payment_account';
+                 frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r_comp) => {
+                    if (r_comp && r_comp[dp_field_in_company]) {
+                        let dp_account = r_comp[dp_field_in_company];
+                        if (taxes.length > 0 && taxes[0].account_head === dp_account) {
+                            frm.doc.taxes.shift(); 
+                        }
+                        // Kembalikan ke On Net Total
+                        $.each(frm.doc.taxes, function(i, row){
+                             row.charge_type = 'On Net Total';
+                        });
+                        
+                        frm.refresh_field('taxes');
+                        if(frm.script_manager.has_handlers('validate', frm.doc.doctype)){
+                             frm.script_manager.trigger('validate');
+                        }
+                    }
+                 });
+            }
+        };
+
+        // EKSEKUSI UTAMA
+        // Jika ketemu template, panggil server untuk ambil rate aslinya
+        if (item_tax_template_name && total_dp > 0) {
+            frappe.call({
+                method: 'frappe.client.get',
+                args: {
+                    doctype: 'Item Tax Template',
+                    name: item_tax_template_name
+                },
+                callback: function(r) {
+                    let fetched_rate = 0;
+                    // Ambil tax rate dari baris pertama template
+                    if (r.message && r.message.taxes && r.message.taxes.length > 0) {
+                        fetched_rate = r.message.taxes[0].tax_rate;
+                    }
+                    
+                    // Jika gagal ambil (misal template kosong), default ke 12 (atau 0)
+                    if (!fetched_rate) fetched_rate = 12; 
+
+                    // Jalankan update pajak dengan rate dari server
+                    apply_tax_logic(fetched_rate);
+                }
+            });
+        } else {
+            // Jika tidak pakai template atau DP dihapus, jalankan dengan default
+            apply_tax_logic(12);
+        }
+    },
     // --- FUNGSI BARU: CEK PENGGUNAAN DP ---
     check_dp_usage: function(frm) {
-        // GANTI 'Sales Invoice Down Payment' DENGAN NAMA DOCTYPE CHILD TABLE ANDA (Langkah 1)
-        let child_doctype_name = 'Sales Invoice DP'; 
-
-        // Panggil method Python yang baru kita buat
-        // Path: nama_app.nama_module.nama_file.nama_fungsi
         frappe.call({
             method: 'hafi_custom_v1.api.get_final_invoices_using_dp',
-            args: { 
-                dp_name: frm.doc.name 
-            },
+            args: { dp_name: frm.doc.name },
             callback: function(r) {
                 if (r.message && r.message.length > 0) {
-                    // Jika ditemukan, buat link HTML
+                    
+                    // 1. Buat Link HTML untuk Alert (Traceability visual)
                     let links = r.message.map(d => {
                         return `<a href="/app/sales-invoice/${d.parent}" style="font-weight:bold; text-decoration:underline;">${d.parent}</a>`;
                     }).join(', ');
 
-                    // Tampilkan Alert Biru di Header Form
+                    // Tampilkan Alert
                     frm.dashboard.set_headline_alert(
                         `<div class="row">
                             <div class="col-xs-12">
@@ -245,14 +336,40 @@ frappe.ui.form.on('Sales Invoice', {
                         </div>`
                     );
                     
-                    // Opsi Tambahan: Tambah Tombol "View Final Invoice" di menu atas
+                    // 2. Logic Tombol "View Final Invoice" (SMART VIEW)
                     frm.add_custom_button(__('View Final Invoice'), function() {
-                        // Buka invoice pertama yang ditemukan
-                        frappe.set_route('Form', 'Sales Invoice', r.message[0].parent);
+                        // Kumpulkan semua nomor invoice ke dalam Array
+                        let invoice_names = r.message.map(d => d.parent);
+
+                        if (invoice_names.length === 1) {
+                            // KASUS A: Cuma 1 Invoice -> Buka Form langsung
+                            frappe.set_route('Form', 'Sales Invoice', invoice_names[0]);
+                        } else {
+                            // KASUS B: Lebih dari 1 Invoice -> Buka List View difilter
+                            frappe.route_options = {
+                                'name': ['in', invoice_names] // Filter: Name IN [List Invoice]
+                            };
+                            frappe.set_route('List', 'Sales Invoice');
+                        }
                     }, __("View"));
                 }
             }
         });
     }
+});
+
+// 3. TRIGGER UPDATE REALTIME
+// Tambahkan ini di LUAR blok frappe.ui.form.on('Sales Invoice', {...})
+// Ganti 'Sales Invoice DP' dengan nama DocType Child Table Anda
+frappe.ui.form.on('Sales Invoice DP', {
+    // Saat user merubah nilai amount manual
+    amount: function(frm, cdt, cdn) {
+        frm.trigger('calculate_dp_deduction');
+    },
+    // Saat user menghapus baris DP
+    si_down_payment_remove: function(frm) {
+        frm.trigger('calculate_dp_deduction');
+    },
+
     
 });
