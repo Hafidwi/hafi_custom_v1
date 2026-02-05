@@ -182,7 +182,7 @@ frappe.ui.form.on('Sales Invoice', {
         });
     },
 
-    // 2. FUNGSI HITUNG PAJAK (UPDATED: DYNAMIC RATE FROM ITEM TAX TEMPLATE)
+    // 2. FUNGSI HITUNG PAJAK (VERSION: AUTO-DETECT ITEM TAX TEMPLATE)
     calculate_dp_deduction: function(frm) {
         let total_dp = 0;
         let table_field = 'custom_si_down_payment'; 
@@ -192,124 +192,94 @@ frappe.ui.form.on('Sales Invoice', {
             total_dp += d.amount;
         });
 
-        // ----------------------------------------------------------------
-        // STEP BARU: CARI RATE DARI ITEM TAX TEMPLATE
-        // ----------------------------------------------------------------
-        let item_tax_template_name = null;
-        
-        // Cek Item pertama yang memiliki Tax Template
-        if (frm.doc.items && frm.doc.items.length > 0) {
-            $.each(frm.doc.items, function(i, item){
-                if (item.item_tax_template) {
-                    item_tax_template_name = item.item_tax_template;
-                    return false; // Break loop jika sudah ketemu
+        // Helper: Fungsi untuk membangun tabel pajak
+        let build_tax_table = function(ppn_account, ppn_rate) {
+             let dp_field_in_company = 'custom_default_down_payment_account';
+             
+             frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r_comp) => {
+                if (r_comp && r_comp[dp_field_in_company]) {
+                    let dp_account = r_comp[dp_field_in_company];
+
+                    // RESET TOTAL TABEL PAJAK
+                    frm.clear_table('taxes');
+
+                    // BARIS 1: DOWN PAYMENT (Index 0)
+                    let row_dp = frm.add_child('taxes');
+                    row_dp.charge_type = 'Actual';
+                    row_dp.account_head = dp_account;
+                    row_dp.description = "Potongan Down Payment (DP)";
+                    row_dp.tax_amount = -1 * total_dp; // Negatif
+                    row_dp.rate = 0;
+                    
+                    // BARIS 2: PPN (Index 1) - Jika Akun PPN ditemukan
+                    if (ppn_account) {
+                        let row_ppn = frm.add_child('taxes');
+                        // Set ke 'On Previous Row Total' agar menghitung dari (Item - DP)
+                        row_ppn.charge_type = 'On Previous Row Total';
+                        row_ppn.row_id = 1; // Merujuk ke Baris 1 (DP)
+                        row_ppn.account_head = ppn_account;
+                        row_ppn.description = "PPN Keluaran (Selisih)";
+                        row_ppn.rate = ppn_rate; 
+                    }
+
+                    frm.refresh_field('taxes');
+                    
+                    // Trigger Save/Validate agar angka terhitung
+                    if(frm.script_manager.has_handlers('validate', frm.doc.doctype)){
+                         frm.script_manager.trigger('validate');
+                    }
                 }
-            });
-        }
-
-        // Fungsi Helper untuk Update Tabel Pajak (agar tidak duplikat kode)
-        let apply_tax_logic = function(rate_percent) {
-             if (!frm.doc.taxes) frm.doc.taxes = [];
-             let taxes = frm.doc.taxes;
-
-             // --- SKENARIO A: ADA DP ---
-             if (total_dp > 0) {
-                let dp_field_in_company = 'custom_default_down_payment_account';
-                
-                frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r_comp) => {
-                    if (r_comp && r_comp[dp_field_in_company]) {
-                        let dp_account = r_comp[dp_field_in_company];
-                        let dp_row = null;
-
-                        // A1. Pastikan Row DP ada di Urutan Pertama (Index 0)
-                        if (taxes.length > 0 && taxes[0].account_head === dp_account) {
-                            dp_row = taxes[0];
-                        } else {
-                            let new_row = frappe.model.add_child(frm.doc, "Sales Taxes and Charges", "taxes");
-                            taxes.pop(); 
-                            taxes.unshift(new_row); 
-                            dp_row = new_row;
-                        }
-
-                        // A2. Isi Data Row DP
-                        dp_row.charge_type = 'Actual';
-                        dp_row.account_head = dp_account;
-                        dp_row.description = "Potongan Down Payment (DP)";
-                        dp_row.tax_amount = -1 * total_dp; 
-                        dp_row.rate = 0; 
-                        dp_row.cost_center = frm.doc.cost_center || null;
-
-                        // A3. UPDATE ROW PPN (PAKAI RATE DINAMIS)
-                        for (let i = 1; i < taxes.length; i++) {
-                            let row = taxes[i];
-                            
-                            // Ubah ke 'On Previous Row Total'
-                            row.charge_type = 'On Previous Row Total';
-                            row.row_id = i; 
-
-                            // FORCE RATE SESUAI TEMPLATE
-                            // Jika row.rate kosong/nol, kita paksa isi dengan rate dari template
-                            if (row.rate === 0 && rate_percent > 0) {
-                                row.rate = rate_percent; 
-                            }
-                        }
-
-                        frm.refresh_field('taxes');
-                        if(frm.script_manager.has_handlers('validate', frm.doc.doctype)){
-                             frm.script_manager.trigger('validate');
-                        }
-                    }
-                });
-            } 
-            // --- SKENARIO B: DP NOL / RESET ---
-            else {
-                 let dp_field_in_company = 'custom_default_down_payment_account';
-                 frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r_comp) => {
-                    if (r_comp && r_comp[dp_field_in_company]) {
-                        let dp_account = r_comp[dp_field_in_company];
-                        if (taxes.length > 0 && taxes[0].account_head === dp_account) {
-                            frm.doc.taxes.shift(); 
-                        }
-                        // Kembalikan ke On Net Total
-                        $.each(frm.doc.taxes, function(i, row){
-                             row.charge_type = 'On Net Total';
-                        });
-                        
-                        frm.refresh_field('taxes');
-                        if(frm.script_manager.has_handlers('validate', frm.doc.doctype)){
-                             frm.script_manager.trigger('validate');
-                        }
-                    }
-                 });
-            }
+             });
         };
 
-        // EKSEKUSI UTAMA
-        // Jika ketemu template, panggil server untuk ambil rate aslinya
-        if (item_tax_template_name && total_dp > 0) {
-            frappe.call({
-                method: 'frappe.client.get',
-                args: {
-                    doctype: 'Item Tax Template',
-                    name: item_tax_template_name
-                },
-                callback: function(r) {
-                    let fetched_rate = 0;
-                    // Ambil tax rate dari baris pertama template
-                    if (r.message && r.message.taxes && r.message.taxes.length > 0) {
-                        fetched_rate = r.message.taxes[0].tax_rate;
-                    }
-                    
-                    // Jika gagal ambil (misal template kosong), default ke 12 (atau 0)
-                    if (!fetched_rate) fetched_rate = 12; 
+        // --- LOGIKA UTAMA ---
+        if (total_dp > 0) {
+            // Cek 1: Apakah sudah ada PPN di tabel header? (Manual select)
+            let existing_ppn_account = null;
+            let existing_ppn_rate = 0;
+            
+            if (frm.doc.taxes && frm.doc.taxes.length > 0) {
+                 $.each(frm.doc.taxes, function(i, row){
+                     if (!row.account_head.includes('2121.001')) { // Bukan akun DP
+                         existing_ppn_account = row.account_head;
+                         existing_ppn_rate = row.rate;
+                         return false; 
+                     }
+                 });
+            }
 
-                    // Jalankan update pajak dengan rate dari server
-                    apply_tax_logic(fetched_rate);
+            if (existing_ppn_account) {
+                // Jika user manual pilih template, pakai itu
+                build_tax_table(existing_ppn_account, existing_ppn_rate || 12);
+            } else {
+                // Cek 2: Jika kosong, AMBIL DARI ITEM TAX TEMPLATE
+                if (frm.doc.items && frm.doc.items.length > 0 && frm.doc.items[0].item_tax_template) {
+                    let template_name = frm.doc.items[0].item_tax_template;
+                    
+                    // Panggil Server untuk baca detail Template
+                    frappe.call({
+                        method: 'frappe.client.get',
+                        args: { doctype: 'Item Tax Template', name: template_name },
+                        callback: function(r) {
+                            if (r.message && r.message.taxes && r.message.taxes.length > 0) {
+                                // Ambil Akun dan Rate dari dalam Template
+                                let tax_detail = r.message.taxes[0];
+                                build_tax_table(tax_detail.tax_type, tax_detail.tax_rate);
+                            } else {
+                                frappe.msgprint("Item Tax Template kosong atau tidak valid.");
+                            }
+                        }
+                    });
+                } else {
+                    // Fallback: Jika tidak ada template sama sekali, hanya pasang DP
+                    build_tax_table(null, 0);
+                    frappe.msgprint("Warning: Tidak ditemukan setting PPN (Header maupun Item). PPN tidak akan dihitung.");
                 }
-            });
+            }
         } else {
-            // Jika tidak pakai template atau DP dihapus, jalankan dengan default
-            apply_tax_logic(12);
+            // Jika DP dihapus (Nol), reset tabel (Opsional)
+             frm.clear_table('taxes');
+             frm.refresh_field('taxes');
         }
     },
     // --- FUNGSI BARU: CEK PENGGUNAAN DP ---
