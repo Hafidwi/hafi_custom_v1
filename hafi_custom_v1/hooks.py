@@ -14,6 +14,13 @@ doctype_js = {
     "Employee Advance": "public/js/employee_advance.js",
     "Purchase Invoice": "public/js/purchase_invoice.js"
 }
+
+doc_events = {
+    "Sales Invoice": {
+        "validate": "hafi_custom_v1.sales_invoice.validate"
+    }
+}
+
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
