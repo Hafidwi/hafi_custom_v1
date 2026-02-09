@@ -5,7 +5,7 @@ app_description = "custom v1"
 app_email = "anjarian46@gmail.com"
 app_license = "mit"
 
-
+#test beda
 # Apps
 # ------------------
 doctype_js = {
