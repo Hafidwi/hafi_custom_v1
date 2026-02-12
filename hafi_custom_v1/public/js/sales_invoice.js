@@ -113,32 +113,7 @@ frappe.ui.form.on('Sales Invoice', {
 
     // --- REVISI UTAMA: LOGIC AKUN DP ---
     // HAPUS function update_debit_to, GANTI dengan ini:
-    update_item_account: function(frm) {
-        if (!frm.doc.company) return;
-
-        // Jika DP dicentang
-        if (frm.doc.custom_dp) {
-            let dp_field_in_company = 'custom_default_down_payment_account';
-            
-            frappe.db.get_value('Company', frm.doc.company, dp_field_in_company, (r) => {
-                if (r && r[dp_field_in_company]) {
-                    let dp_account = r[dp_field_in_company];
-
-                    // Loop semua item, ganti Income Account menjadi Akun DP
-                    $.each(frm.doc.items || [], function(i, d) {
-                        if (d.income_account !== dp_account) {
-                            frappe.model.set_value(d.doctype, d.name, 'income_account', dp_account);
-                        }
-                    });
-                    
-                    // (Opsional) Kembalikan Debit To ke Default jika sebelumnya salah
-                    // Biarkan ERPNext menghandle Debit To (biasanya otomatis Piutang)
-                } 
-            });
-        } 
-        // Note: Jika di-uncheck, kita biarkan saja income account yang ada (atau user ganti manual), 
-        // karena sulit menebak akun income default per item secara massal.
-    },
+    
     // 1. FUNGSI TOMBOL GET DOWN PAYMENT (VERSI BARU - PARTIAL)
     custom_get_down_payment: function(frm) {
         if (!frm.doc.customer) {
